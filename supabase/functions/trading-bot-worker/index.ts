@@ -153,7 +153,22 @@ const shouldExecuteTrade = async (
       };
     }
 
-    const targets: PriceTarget[] = JSON.parse(executionState.price_targets);
+    let targets: PriceTarget[];
+    try {
+      targets = JSON.parse(executionState.price_targets);
+      if (!Array.isArray(targets) || targets.length === 0) {
+        throw new Error('Invalid targets array');
+      }
+    } catch (error) {
+      const newTargets = calculatePriceTargets(currentPrice, strategy);
+      return {
+        shouldExecute: false,
+        updatedState: {
+          initial_price: currentPrice,
+          price_targets: JSON.stringify(newTargets)
+        }
+      };
+    }
     const visibleTargets = targets.slice(0, 5);
     const reserveTargets = targets.slice(5);
 
@@ -285,12 +300,25 @@ Deno.serve(async (req: Request) => {
             .from('bot_execution_state')
             .select('*')
             .eq('user_id', session.user_id)
-            .single()
+            .maybeSingle()
         ]);
 
         const strategy = strategyRes.data;
         const wallets = walletsRes.data;
-        const executionState = stateRes.data;
+        let executionState = stateRes.data;
+
+        if (!executionState) {
+          const { data: newState } = await supabaseClient
+            .from('bot_execution_state')
+            .insert({
+              user_id: session.user_id,
+              execution_count: 0,
+              updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+          executionState = newState;
+        }
 
         if (!strategy || !wallets || wallets.length === 0) {
           console.error(`Missing data for user ${session.user_id}`);
@@ -361,9 +389,7 @@ Deno.serve(async (req: Request) => {
                 amount: getRandomAmount(strategy.min_amount, strategy.max_amount),
                 price: currentPrice,
                 dex: strategy.selected_dex,
-                token_symbol: 'TOKEN',
-                tx_hash: tradeResult.txHash,
-                created_at: new Date().toISOString()
+                token_symbol: 'TOKEN'
               }),
             supabaseClient
               .from('bot_execution_state')
