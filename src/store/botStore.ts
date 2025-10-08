@@ -3,6 +3,12 @@ import { BotStats, ActivityLog, Wallet, CustomToken, TradingStrategy } from '../
 import { BUGS_TOKEN_ADDRESS } from '../utils/web3';
 import { supabase } from '../lib/supabase';
 
+interface PriceTarget {
+  price: number;
+  executed: boolean;
+  id: string;
+}
+
 interface BotState {
   botRunning: boolean;
   wallets: Wallet[];
@@ -13,6 +19,8 @@ interface BotState {
   volume24h: number;
   lastVolume24hReset: number;
   tradingStrategy: TradingStrategy;
+  priceTargets: PriceTarget[];
+  initialPrice: number | null;
   initialized: boolean;
   loading: boolean;
   initializeStore: (userId: string) => Promise<void>;
@@ -27,6 +35,8 @@ interface BotState {
   updateTradingStrategy: (strategy: Partial<TradingStrategy>, userId: string) => Promise<void>;
   selectToken: (tokenAddress: string, userId: string) => Promise<void>;
   reset24hVolume: (userId: string) => Promise<void>;
+  savePriceTargets: (targets: PriceTarget[], initialPrice: number, userId: string) => Promise<void>;
+  clearPriceTargets: (userId: string) => Promise<void>;
   resetStore: () => void;
 }
 
@@ -35,7 +45,7 @@ const defaultStrategy: TradingStrategy = {
   minAmount: 0.001,
   maxAmount: 0.01,
   slippage: 0.5,
-  tradingMode: 'interval',
+  tradingMode: 'percentage',
   interval: 5,
   intervalType: 'minutes',
   percentageThreshold: 1.0,
@@ -58,6 +68,8 @@ export const useBotStore = create<BotState>()((set, get) => ({
   volume24h: 0,
   lastVolume24hReset: Date.now(),
   tradingStrategy: defaultStrategy,
+  priceTargets: [],
+  initialPrice: null,
   initialized: false,
   loading: false,
 
@@ -67,13 +79,14 @@ export const useBotStore = create<BotState>()((set, get) => ({
     set({ loading: true });
 
     try {
-      const [walletsRes, customTokensRes, strategyRes, sessionRes, statsRes, logsRes] = await Promise.all([
+      const [walletsRes, customTokensRes, strategyRes, sessionRes, statsRes, logsRes, executionStateRes] = await Promise.all([
         supabase.from('wallets').select('*').eq('user_id', userId),
         supabase.from('custom_tokens').select('*').eq('user_id', userId),
         supabase.from('trading_strategies').select('*').eq('user_id', userId).maybeSingle(),
         supabase.from('bot_sessions').select('*').eq('user_id', userId).maybeSingle(),
         supabase.from('bot_stats').select('*').eq('user_id', userId).maybeSingle(),
-        supabase.from('activity_logs').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50)
+        supabase.from('activity_logs').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
+        supabase.from('bot_execution_state').select('*').eq('user_id', userId).maybeSingle()
       ]);
 
       const wallets = walletsRes.data || [];
@@ -93,6 +106,7 @@ export const useBotStore = create<BotState>()((set, get) => ({
       const session = sessionRes.data;
       const stats = statsRes.data;
       const logs = logsRes.data || [];
+      const executionState = executionStateRes.data;
 
       if (!strategy) {
         await supabase.from('trading_strategies').insert({
@@ -137,6 +151,8 @@ export const useBotStore = create<BotState>()((set, get) => ({
         totalVolume: Number(stats?.total_volume || 0),
         volume24h: Number(stats?.volume_24h || 0),
         lastVolume24hReset: stats?.last_volume_24h_reset ? new Date(stats.last_volume_24h_reset).getTime() : Date.now(),
+        priceTargets: executionState?.price_targets ? JSON.parse(executionState.price_targets) : [],
+        initialPrice: executionState?.initial_price ? Number(executionState.initial_price) : null,
         activityLogs: logs.map((log: any) => ({
           type: log.type,
           amount: log.amount,
@@ -304,6 +320,28 @@ export const useBotStore = create<BotState>()((set, get) => ({
     }).eq('user_id', userId);
   },
 
+  savePriceTargets: async (targets: PriceTarget[], initialPrice: number, userId: string) => {
+    set({ priceTargets: targets, initialPrice });
+    await supabase.from('bot_execution_state').upsert({
+      user_id: userId,
+      price_targets: JSON.stringify(targets),
+      initial_price: initialPrice,
+      updated_at: new Date().toISOString()
+    });
+  },
+
+  clearPriceTargets: async (userId: string) => {
+    set({ priceTargets: [], initialPrice: null });
+    await supabase.from('bot_execution_state').update({
+      price_targets: null,
+      initial_price: null,
+      last_execution_time: null,
+      next_execution_time: null,
+      execution_count: 0,
+      updated_at: new Date().toISOString()
+    }).eq('user_id', userId);
+  },
+
   resetStore: () => {
     set({
       botRunning: false,
@@ -319,6 +357,8 @@ export const useBotStore = create<BotState>()((set, get) => ({
       volume24h: 0,
       lastVolume24hReset: Date.now(),
       tradingStrategy: defaultStrategy,
+      priceTargets: [],
+      initialPrice: null,
       initialized: false,
       loading: false
     });

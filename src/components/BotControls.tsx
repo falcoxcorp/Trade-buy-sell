@@ -24,7 +24,11 @@ export const BotControls: React.FC = () => {
     updateBotStats,
     updateTotalVolume,
     botStats,
-    customTokens
+    customTokens,
+    savePriceTargets,
+    clearPriceTargets,
+    priceTargets: storedPriceTargets,
+    initialPrice: storedInitialPrice
   } = useBotStore();
   
   const [error, setError] = useState<string | null>(null);
@@ -62,14 +66,13 @@ export const BotControls: React.FC = () => {
     const targets: PriceTarget[] = [];
     let targetPrice = currentPrice;
 
-    // Calculate 15 price targets (5 visible + 10 reserve)
     for (let i = 0; i < 15; i++) {
       if (tradingStrategy.type === 'daily_smooth_buy') {
         targetPrice = targetPrice * (1 - tradingStrategy.percentageThreshold / 100);
       } else {
         targetPrice = targetPrice * (1 + tradingStrategy.percentageThreshold / 100);
       }
-      
+
       targets.push({
         price: targetPrice,
         executed: false,
@@ -78,7 +81,8 @@ export const BotControls: React.FC = () => {
     }
 
     priceTargetsRef.current = targets;
-    console.log('Initial price targets calculated:', targets);
+    await savePriceTargets(targets, currentPrice, userId);
+    console.log('Price targets calculated and saved to DB:', targets);
   };
 
   const checkPriceTargets = async (currentPrice: number): Promise<boolean> => {
@@ -99,7 +103,7 @@ export const BotControls: React.FC = () => {
 
       if (shouldExecute) {
         target.executed = true;
-        
+
         if (reserveTargets.length > 0) {
           const newTarget = reserveTargets.shift()!;
           priceTargetsRef.current = [
@@ -110,6 +114,9 @@ export const BotControls: React.FC = () => {
             ...reserveTargets
           ];
         }
+
+        await savePriceTargets(priceTargetsRef.current, initialPriceRef.current!, userId);
+        console.log('Price target executed and updated in DB');
 
         return true;
       }
@@ -275,12 +282,19 @@ export const BotControls: React.FC = () => {
 
       errorCountRef.current = 0;
       reconnectAttemptsRef.current = 0;
-      initialPriceRef.current = null;
-      priceTargetsRef.current = [];
-      
+
+      if (storedPriceTargets.length > 0 && storedInitialPrice) {
+        initialPriceRef.current = storedInitialPrice;
+        priceTargetsRef.current = storedPriceTargets;
+        console.log('Loaded price targets from DB:', storedPriceTargets);
+      } else {
+        initialPriceRef.current = null;
+        priceTargetsRef.current = [];
+      }
+
       executeTradingStrategy();
 
-      const monitoringInterval = tradingStrategy.tradingMode === 'percentage' ? 10000 : 
+      const monitoringInterval = tradingStrategy.tradingMode === 'percentage' ? 10000 :
         tradingStrategy.intervalType === 'seconds' ? tradingStrategy.interval * 1000 :
         tradingStrategy.intervalType === 'minutes' ? tradingStrategy.interval * 60 * 1000 :
         tradingStrategy.interval * 60 * 60 * 1000;
@@ -301,7 +315,7 @@ export const BotControls: React.FC = () => {
         intervalRef.current = null;
       }
     };
-  }, [botRunning, tradingStrategy]);
+  }, [botRunning, tradingStrategy, storedPriceTargets, storedInitialPrice]);
 
   const handleStart = () => {
     if (!tradingStrategy.selectedToken) {
@@ -319,12 +333,14 @@ export const BotControls: React.FC = () => {
     setBotRunning(true, userId);
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
     setBotRunning(false, userId);
+    await clearPriceTargets(userId);
     setError(null);
     initialPriceRef.current = null;
     priceTargetsRef.current = [];
     reconnectAttemptsRef.current = 0;
+    console.log('Bot stopped and price targets cleared from DB');
   };
 
   return (
