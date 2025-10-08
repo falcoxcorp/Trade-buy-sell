@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useBotStore } from '../store/botStore';
+import { useUser } from '../hooks/useUser';
 import { ActivityChart } from './ActivityChart';
 import { BotControls } from './BotControls';
 import { MarketStats } from './MarketStats';
@@ -7,7 +8,25 @@ import { ActivityLog } from './ActivityLog';
 import { ExternalLink, Twitter, MessageCircle, Phone } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
-  const { botStats, activityLogs } = useBotStore();
+  const { userId } = useUser();
+  const { botStats, activityLogs, initializeStore, loading } = useBotStore();
+
+  useEffect(() => {
+    if (userId) {
+      initializeStore(userId);
+    }
+  }, [userId]);
+
+  if (loading) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your bot configuration...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-md">
@@ -96,6 +115,18 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {botStats.totalTx === 0 && (
+        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg mb-6 flex items-start gap-2">
+          <div className="text-blue-700">
+            <p className="font-semibold mb-2">Welcome to your Trading Bot!</p>
+            <p className="text-sm">
+              Configure your strategy below and click "Start Bot". Your bot will run automatically in the cloud,
+              even when you close this page or turn off your computer. All your settings are saved automatically.
+            </p>
+          </div>
+        </div>
+      )}
 
       <MarketStats />
       <BotControls />

@@ -320,7 +320,7 @@ export const BotControls: React.FC = () => {
   };
 
   const handleStop = () => {
-    setBotRunning(false);
+    setBotRunning(false, userId);
     setError(null);
     initialPriceRef.current = null;
     priceTargetsRef.current = [];

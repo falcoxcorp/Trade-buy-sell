@@ -10,7 +10,8 @@ export const ConfigForm: React.FC = () => {
   const { tradingStrategy, updateTradingStrategy, wallets, customTokens } = useBotStore();
   const updateStrategy = (update: any) => updateTradingStrategy(update, userId);
   const [tokenBalance, setTokenBalance] = useState<string>('0');
-  const [showSaveReminder, setShowSaveReminder] = useState(false);
+  const [showSaveNotification, setShowSaveNotification] = useState(false);
+  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const updateTokenBalance = async () => {
     if (!tradingStrategy.selectedToken || wallets.length === 0 || tradingStrategy.type !== 'daily_smooth_sell') {
@@ -45,36 +46,16 @@ export const ConfigForm: React.FC = () => {
     return () => clearInterval(interval);
   }, [tradingStrategy.selectedToken, tradingStrategy.type, wallets]);
 
+  const showSaveSuccess = () => {
+    setShowSaveNotification(true);
+    if (saveTimeout) clearTimeout(saveTimeout);
+    const timeout = setTimeout(() => setShowSaveNotification(false), 2000);
+    setSaveTimeout(timeout);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (tradingStrategy.minAmount >= tradingStrategy.maxAmount) {
-      alert('Minimum amount must be less than maximum amount');
-      return;
-    }
-
-    if (tradingStrategy.type === 'daily_smooth_buy' && tradingStrategy.minAmount < 0.001) {
-      alert('Minimum amount must be at least 0.001 CORE');
-      return;
-    }
-
-    if (tradingStrategy.type === 'daily_smooth_sell' && parseFloat(tokenBalance) < tradingStrategy.maxAmount) {
-      alert(`Maximum amount cannot exceed your token balance (${tokenBalance})`);
-      return;
-    }
-
-    if (tradingStrategy.slippage <= 0 || tradingStrategy.slippage > 100) {
-      alert('Slippage must be between 0.1% and 100%');
-      return;
-    }
-
-    if (tradingStrategy.tradingMode === 'percentage' && (tradingStrategy.percentageThreshold <= 0 || tradingStrategy.percentageThreshold > 100)) {
-      alert('Percentage threshold must be between 0.1% and 100%');
-      return;
-    }
-
-    setShowSaveReminder(false);
-    alert('Configuration saved successfully');
+    showSaveSuccess();
   };
 
   const handleNumberInput = async (value: string, field: keyof typeof tradingStrategy) => {
@@ -85,7 +66,7 @@ export const ConfigForm: React.FC = () => {
         return;
       }
       await updateStrategy({ [field]: number });
-      setShowSaveReminder(true);
+      showSaveSuccess();
     }
   };
 
@@ -104,11 +85,11 @@ export const ConfigForm: React.FC = () => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {showSaveReminder && (
-        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-          <div className="text-yellow-700">
-            Remember to save your configuration after making changes!
+      {showSaveNotification && (
+        <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded-lg flex items-start gap-2 animate-fade-in">
+          <AlertCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+          <div className="text-green-700">
+            Configuration saved automatically!
           </div>
         </div>
       )}
@@ -126,8 +107,7 @@ export const ConfigForm: React.FC = () => {
               minAmount: newType === 'daily_smooth_buy' ? 0.001 : 0,
               maxAmount: newType === 'daily_smooth_buy' ? 0.01 : 0
             });
-            setShowSaveReminder(true);
-            alert(`You've switched to ${newType === 'daily_smooth_buy' ? 'Buy' : 'Sell'} mode. Please review and save your configuration!`);
+            showSaveSuccess();
           }}
         >
           <option value="daily_smooth_buy">Daily Smooth Buy</option>
@@ -143,7 +123,7 @@ export const ConfigForm: React.FC = () => {
           value={tradingStrategy.tradingMode}
           onChange={async (e) => {
             await updateStrategy({ tradingMode: e.target.value as TradingMode });
-            setShowSaveReminder(true);
+            showSaveSuccess();
           }}
         >
           <option value="interval">Time Interval</option>
@@ -173,7 +153,7 @@ export const ConfigForm: React.FC = () => {
                 await updateStrategy({
                   intervalType: e.target.value as 'seconds' | 'minutes' | 'hours'
                 });
-                setShowSaveReminder(true);
+                showSaveSuccess();
               }}
             >
               <option value="seconds">Seconds</option>
@@ -255,7 +235,7 @@ export const ConfigForm: React.FC = () => {
             checked={tradingStrategy.active24_7}
             onChange={async (e) => {
               await updateStrategy({ active24_7: e.target.checked });
-              setShowSaveReminder(true);
+              showSaveSuccess();
             }}
             className="rounded border-gray-300 text-primary focus:ring-primary"
           />
@@ -263,9 +243,9 @@ export const ConfigForm: React.FC = () => {
         </label>
       </div>
 
-      <button type="submit" className="btn btn-primary w-full">
-        Save Configuration
-      </button>
+      <div className="text-sm text-gray-600 text-center p-4 bg-gray-50 rounded-lg">
+        All changes are saved automatically. Your bot will use these settings even when the page is closed.
+      </div>
     </form>
   );
 };
