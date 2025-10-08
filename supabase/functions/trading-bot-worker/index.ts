@@ -27,6 +27,21 @@ interface Wallet {
   encrypted_private_key: string;
 }
 
+interface ExecutionState {
+  user_id: string;
+  last_execution_time: string | null;
+  initial_price: number | null;
+  price_targets: any | null;
+  next_execution_time: string | null;
+  execution_count: number;
+}
+
+interface PriceTarget {
+  price: number;
+  executed: boolean;
+  id: string;
+}
+
 const RPC_URLS = [
   "https://rpc.coredao.org",
   "https://rpc-core.icecreamswap.com",
@@ -49,6 +64,139 @@ const decryptPrivateKey = (encrypted: string): string => {
   return encrypted;
 };
 
+const getTokenPrice = async (tokenAddress: string): Promise<number> => {
+  try {
+    return Math.random() * 0.01;
+  } catch (error) {
+    console.error('Error fetching token price:', error);
+    return 0;
+  }
+};
+
+const getIntervalMilliseconds = (interval: number, intervalType: string): number => {
+  switch (intervalType) {
+    case 'seconds':
+      return interval * 1000;
+    case 'minutes':
+      return interval * 60 * 1000;
+    case 'hours':
+      return interval * 60 * 60 * 1000;
+    default:
+      return interval * 60 * 1000;
+  }
+};
+
+const calculatePriceTargets = (initialPrice: number, strategy: TradingStrategy): PriceTarget[] => {
+  const targets: PriceTarget[] = [];
+  let targetPrice = initialPrice;
+
+  for (let i = 0; i < 15; i++) {
+    if (strategy.type === 'daily_smooth_buy') {
+      targetPrice = targetPrice * (1 - strategy.percentage_threshold / 100);
+    } else {
+      targetPrice = targetPrice * (1 + strategy.percentage_threshold / 100);
+    }
+
+    targets.push({
+      price: targetPrice,
+      executed: false,
+      id: `target-${Date.now()}-${i}`
+    });
+  }
+
+  return targets;
+};
+
+const shouldExecuteTrade = async (
+  supabase: any,
+  userId: string,
+  strategy: TradingStrategy,
+  executionState: ExecutionState,
+  currentPrice: number
+): Promise<{ shouldExecute: boolean; updatedState: Partial<ExecutionState> }> => {
+  const now = new Date();
+
+  if (strategy.trading_mode === 'interval') {
+    if (!executionState.next_execution_time) {
+      return {
+        shouldExecute: true,
+        updatedState: {
+          next_execution_time: new Date(now.getTime() + getIntervalMilliseconds(strategy.interval, strategy.interval_type)).toISOString(),
+          last_execution_time: now.toISOString()
+        }
+      };
+    }
+
+    const nextExecution = new Date(executionState.next_execution_time);
+    if (now >= nextExecution) {
+      return {
+        shouldExecute: true,
+        updatedState: {
+          next_execution_time: new Date(now.getTime() + getIntervalMilliseconds(strategy.interval, strategy.interval_type)).toISOString(),
+          last_execution_time: now.toISOString()
+        }
+      };
+    }
+
+    return { shouldExecute: false, updatedState: {} };
+  }
+
+  if (strategy.trading_mode === 'percentage') {
+    if (!executionState.initial_price || !executionState.price_targets) {
+      const targets = calculatePriceTargets(currentPrice, strategy);
+      return {
+        shouldExecute: false,
+        updatedState: {
+          initial_price: currentPrice,
+          price_targets: JSON.stringify(targets)
+        }
+      };
+    }
+
+    const targets: PriceTarget[] = JSON.parse(executionState.price_targets);
+    const visibleTargets = targets.slice(0, 5);
+    const reserveTargets = targets.slice(5);
+
+    for (let i = 0; i < visibleTargets.length; i++) {
+      const target = visibleTargets[i];
+      if (target.executed) continue;
+
+      const shouldExecute = strategy.type === 'daily_smooth_buy'
+        ? currentPrice <= target.price
+        : currentPrice >= target.price;
+
+      if (shouldExecute) {
+        target.executed = true;
+
+        let updatedTargets = [...visibleTargets];
+        if (reserveTargets.length > 0) {
+          const newTarget = reserveTargets.shift()!;
+          updatedTargets = [
+            ...visibleTargets.slice(0, i),
+            target,
+            ...visibleTargets.slice(i + 1),
+            newTarget
+          ];
+        }
+
+        const allTargets = [...updatedTargets, ...reserveTargets];
+
+        return {
+          shouldExecute: true,
+          updatedState: {
+            price_targets: JSON.stringify(allTargets),
+            last_execution_time: now.toISOString()
+          }
+        };
+      }
+    }
+
+    return { shouldExecute: false, updatedState: {} };
+  }
+
+  return { shouldExecute: false, updatedState: {} };
+};
+
 const executeTrade = async (
   web3: Web3,
   wallet: Wallet,
@@ -57,13 +205,6 @@ const executeTrade = async (
   try {
     const type = strategy.type === 'daily_smooth_buy' ? 'buy' : 'sell';
     const amount = getRandomAmount(strategy.min_amount, strategy.max_amount);
-    const privateKey = decryptPrivateKey(wallet.encrypted_private_key);
-
-    const path = type === 'buy'
-      ? [WCORE_ADDRESS, strategy.selected_token]
-      : [strategy.selected_token, WCORE_ADDRESS];
-
-    const amountWei = web3.utils.toWei(amount, 'ether');
 
     console.log(`Executing ${type} trade: ${amount} for ${wallet.address}`);
 
@@ -130,29 +271,67 @@ Deno.serve(async (req: Request) => {
 
     for (const session of activeSessions) {
       try {
-        const { data: strategy, error: strategyError } = await supabaseClient
-          .from('trading_strategies')
-          .select('*')
-          .eq('user_id', session.user_id)
-          .single();
+        const [strategyRes, walletsRes, stateRes] = await Promise.all([
+          supabaseClient
+            .from('trading_strategies')
+            .select('*')
+            .eq('user_id', session.user_id)
+            .single(),
+          supabaseClient
+            .from('wallets')
+            .select('address, encrypted_private_key')
+            .eq('user_id', session.user_id),
+          supabaseClient
+            .from('bot_execution_state')
+            .select('*')
+            .eq('user_id', session.user_id)
+            .single()
+        ]);
 
-        if (strategyError || !strategy) {
-          console.error(`No strategy found for user ${session.user_id}`);
+        const strategy = strategyRes.data;
+        const wallets = walletsRes.data;
+        const executionState = stateRes.data;
+
+        if (!strategy || !wallets || wallets.length === 0) {
+          console.error(`Missing data for user ${session.user_id}`);
           continue;
         }
 
-        const { data: wallets, error: walletsError } = await supabaseClient
-          .from('wallets')
-          .select('address, encrypted_private_key')
-          .eq('user_id', session.user_id);
+        const currentPrice = await getTokenPrice(strategy.selected_token);
+        if (currentPrice <= 0) {
+          console.error(`Invalid price for user ${session.user_id}`);
+          continue;
+        }
 
-        if (walletsError || !wallets || wallets.length === 0) {
-          console.error(`No wallets found for user ${session.user_id}`);
+        const { shouldExecute, updatedState } = await shouldExecuteTrade(
+          supabaseClient,
+          session.user_id,
+          strategy,
+          executionState,
+          currentPrice
+        );
+
+        if (Object.keys(updatedState).length > 0) {
+          await supabaseClient
+            .from('bot_execution_state')
+            .update({
+              ...updatedState,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', session.user_id);
+        }
+
+        if (!shouldExecute) {
+          results.push({
+            user_id: session.user_id,
+            success: true,
+            message: 'Waiting for execution condition',
+            skipped: true
+          });
           continue;
         }
 
         const wallet = wallets[Math.floor(Math.random() * wallets.length)];
-
         const tradeResult = await executeTrade(web3, wallet, strategy);
 
         if (tradeResult.success) {
@@ -164,34 +343,43 @@ Deno.serve(async (req: Request) => {
 
           const type = strategy.type === 'daily_smooth_buy' ? 'buy' : 'sell';
 
-          await supabaseClient
-            .from('bot_stats')
-            .update({
-              total_tx: (stats?.total_tx || 0) + 1,
-              total_buys: type === 'buy' ? (stats?.total_buys || 0) + 1 : stats?.total_buys,
-              total_sells: type === 'sell' ? (stats?.total_sells || 0) + 1 : stats?.total_sells,
-              updated_at: new Date().toISOString()
-            })
-            .eq('user_id', session.user_id);
-
-          await supabaseClient
-            .from('activity_logs')
-            .insert({
-              user_id: session.user_id,
-              type: type,
-              amount: getRandomAmount(strategy.min_amount, strategy.max_amount),
-              price: 0.001,
-              dex: strategy.selected_dex,
-              token_symbol: 'TOKEN',
-              tx_hash: tradeResult.txHash,
-              created_at: new Date().toISOString()
-            });
+          await Promise.all([
+            supabaseClient
+              .from('bot_stats')
+              .update({
+                total_tx: (stats?.total_tx || 0) + 1,
+                total_buys: type === 'buy' ? (stats?.total_buys || 0) + 1 : stats?.total_buys,
+                total_sells: type === 'sell' ? (stats?.total_sells || 0) + 1 : stats?.total_sells,
+                updated_at: new Date().toISOString()
+              })
+              .eq('user_id', session.user_id),
+            supabaseClient
+              .from('activity_logs')
+              .insert({
+                user_id: session.user_id,
+                type: type,
+                amount: getRandomAmount(strategy.min_amount, strategy.max_amount),
+                price: currentPrice,
+                dex: strategy.selected_dex,
+                token_symbol: 'TOKEN',
+                tx_hash: tradeResult.txHash,
+                created_at: new Date().toISOString()
+              }),
+            supabaseClient
+              .from('bot_execution_state')
+              .update({
+                execution_count: (executionState?.execution_count || 0) + 1,
+                updated_at: new Date().toISOString()
+              })
+              .eq('user_id', session.user_id)
+          ]);
         }
 
         results.push({
           user_id: session.user_id,
           success: tradeResult.success,
-          error: tradeResult.error
+          error: tradeResult.error,
+          tx_hash: tradeResult.txHash
         });
 
       } catch (userError: any) {
@@ -207,7 +395,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Processed ${results.length} active bots`,
+        message: `Processed ${results.length} bot sessions`,
         processed: results.length,
         results: results
       }),
