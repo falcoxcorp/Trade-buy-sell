@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { useBotStore } from '../store/botStore';
+import { useUser } from '../hooks/useUser';
 import { Plus, Trash2, ExternalLink, Check } from 'lucide-react';
 import { BUGS_TOKEN_ADDRESS } from '../utils/web3';
 import { DexType } from '../types';
 
 export const TokenList: React.FC = () => {
-  const { 
-    customTokens, 
-    addCustomToken, 
+  const { userId } = useUser();
+  const {
+    customTokens,
+    addCustomToken,
     removeCustomToken,
     tradingStrategy,
-    selectToken 
+    selectToken
   } = useBotStore();
   
   const [newToken, setNewToken] = useState({
@@ -18,23 +20,23 @@ export const TokenList: React.FC = () => {
     name: ''
   });
 
-  const handleAddToken = (e: React.FormEvent) => {
+  const handleAddToken = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newToken.address || !newToken.name) return;
 
-    addCustomToken(newToken.address.toLowerCase(), {
+    await addCustomToken(newToken.address.toLowerCase(), {
       symbol: newToken.name,
       name: newToken.name,
       decimals: 18,
       price: null,
       dex: tradingStrategy.selectedDex
-    });
+    }, userId);
 
     setNewToken({ address: '', name: '' });
   };
 
-  const handleSelectToken = (address: string) => {
-    selectToken(address);
+  const handleSelectToken = async (address: string) => {
+    await selectToken(address, userId);
   };
 
   // Filter tokens based on current DEX
@@ -137,7 +139,7 @@ export const TokenList: React.FC = () => {
                   )}
                 </button>
                 <button
-                  onClick={() => removeCustomToken(address)}
+                  onClick={() => removeCustomToken(address, userId)}
                   className="text-gray-400 hover:text-red-500 transition-colors p-1"
                 >
                   <Trash2 className="w-4 h-4" />

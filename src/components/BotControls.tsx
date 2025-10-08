@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useBotStore } from '../store/botStore';
+import { useUser } from '../hooks/useUser';
 import { initializeWeb3, executeTrade, getTokenPrice, getTokenBalance } from '../utils/web3';
 import { format } from 'date-fns';
 import Web3 from 'web3';
@@ -13,10 +14,11 @@ interface PriceTarget {
 }
 
 export const BotControls: React.FC = () => {
-  const { 
-    botRunning, 
-    setBotRunning, 
-    tradingStrategy, 
+  const { userId } = useUser();
+  const {
+    botRunning,
+    setBotRunning,
+    tradingStrategy,
     wallets,
     addActivityLog,
     updateBotStats,
@@ -119,7 +121,7 @@ export const BotControls: React.FC = () => {
   const reconnect = async (): Promise<boolean> => {
     if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
       setError('Maximum reconnection attempts reached. Please check your internet connection and restart the bot.');
-      setBotRunning(false);
+      setBotRunning(false, userId);
       return false;
     }
 
@@ -146,13 +148,13 @@ export const BotControls: React.FC = () => {
 
     if (wallets.length === 0) {
       setError('No wallets available');
-      setBotRunning(false);
+      setBotRunning(false, userId);
       return;
     }
 
     if (!tradingStrategy.selectedToken) {
       setError('No token selected for trading');
-      setBotRunning(false);
+      setBotRunning(false, userId);
       return;
     }
 
@@ -210,23 +212,23 @@ export const BotControls: React.FC = () => {
       errorCountRef.current = 0;
       setError(null);
 
-      updateBotStats({
+      await updateBotStats({
         totalTx: botStats.totalTx + 1,
         totalBuys: type === 'buy' ? botStats.totalBuys + 1 : botStats.totalBuys,
         totalSells: type === 'sell' ? botStats.totalSells + 1 : botStats.totalSells,
-      });
+      }, userId);
 
       const tokenSymbol = getTokenSymbol(tradingStrategy.selectedToken);
-      addActivityLog({
+      await addActivityLog({
         type,
         amount,
         timestamp: format(new Date(), 'HH:mm:ss'),
         price: currentPrice,
         dex: tradingStrategy.selectedDex,
         tokenSymbol
-      });
+      }, userId);
 
-      updateTotalVolume(parseFloat(amount) * currentPrice);
+      await updateTotalVolume(parseFloat(amount) * currentPrice, userId);
     } catch (error) {
       console.error('Trading error:', error);
       errorCountRef.current++;
@@ -252,7 +254,7 @@ export const BotControls: React.FC = () => {
         const stopMessage = `Bot stopped: ${MAX_ERRORS} consecutive errors occurred`;
         console.error(stopMessage);
         setError(stopMessage);
-        setBotRunning(false);
+        setBotRunning(false, userId);
         return;
       }
 
@@ -267,7 +269,7 @@ export const BotControls: React.FC = () => {
     if (botRunning) {
       if (!tradingStrategy.selectedToken) {
         setError('No token selected for trading');
-        setBotRunning(false);
+        setBotRunning(false, userId);
         return;
       }
 
@@ -314,7 +316,7 @@ export const BotControls: React.FC = () => {
     initialPriceRef.current = null;
     priceTargetsRef.current = [];
     reconnectAttemptsRef.current = 0;
-    setBotRunning(true);
+    setBotRunning(true, userId);
   };
 
   const handleStop = () => {

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useBotStore } from '../store/botStore';
+import { useAuth } from '../contexts/AuthContext';
 import { initializeWeb3 } from '../utils/web3';
 
 export const WalletForm: React.FC = () => {
   const [privateKey, setPrivateKey] = useState('');
   const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
   const addWallet = useBotStore(state => state.addWallet);
 
   const formatPrivateKey = (key: string): string => {
@@ -43,10 +45,11 @@ export const WalletForm: React.FC = () => {
       if (!web3) throw new Error('Failed to connect to network');
 
       const account = web3.eth.accounts.privateKeyToAccount(formattedKey);
-      addWallet({
+      if (!user) throw new Error('User not authenticated');
+      await addWallet({
         address: account.address,
         privateKey: formattedKey
-      });
+      }, user.id);
 
       setPrivateKey('');
       alert('Wallet added successfully');

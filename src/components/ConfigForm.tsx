@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useBotStore } from '../store/botStore';
+import { useUser } from '../hooks/useUser';
 import { DexType, TradingMode } from '../types';
 import { getTokenBalance, initializeWeb3, formatTokenAmount } from '../utils/web3';
 import { AlertCircle } from 'lucide-react';
 
 export const ConfigForm: React.FC = () => {
+  const { userId } = useUser();
   const { tradingStrategy, updateTradingStrategy, wallets, customTokens } = useBotStore();
+  const updateStrategy = (update: any) => updateTradingStrategy(update, userId);
   const [tokenBalance, setTokenBalance] = useState<string>('0');
   const [showSaveReminder, setShowSaveReminder] = useState(false);
 
@@ -74,14 +77,14 @@ export const ConfigForm: React.FC = () => {
     alert('Configuration saved successfully');
   };
 
-  const handleNumberInput = (value: string, field: keyof typeof tradingStrategy) => {
+  const handleNumberInput = async (value: string, field: keyof typeof tradingStrategy) => {
     const number = parseFloat(value);
     if (!isNaN(number)) {
       if (tradingStrategy.type === 'daily_smooth_sell' && field === 'maxAmount' && number > parseFloat(tokenBalance)) {
         alert(`Cannot set maximum amount higher than your token balance (${tokenBalance})`);
         return;
       }
-      updateTradingStrategy({ [field]: number });
+      await updateStrategy({ [field]: number });
       setShowSaveReminder(true);
     }
   };
@@ -116,9 +119,9 @@ export const ConfigForm: React.FC = () => {
           id="strategy"
           className="select"
           value={tradingStrategy.type}
-          onChange={(e) => {
+          onChange={async (e) => {
             const newType = e.target.value as 'daily_smooth_buy' | 'daily_smooth_sell';
-            updateTradingStrategy({ 
+            await updateStrategy({
               type: newType,
               minAmount: newType === 'daily_smooth_buy' ? 0.001 : 0,
               maxAmount: newType === 'daily_smooth_buy' ? 0.01 : 0
@@ -138,8 +141,8 @@ export const ConfigForm: React.FC = () => {
           id="tradingMode"
           className="select"
           value={tradingStrategy.tradingMode}
-          onChange={(e) => {
-            updateTradingStrategy({ tradingMode: e.target.value as TradingMode });
+          onChange={async (e) => {
+            await updateStrategy({ tradingMode: e.target.value as TradingMode });
             setShowSaveReminder(true);
           }}
         >
@@ -166,9 +169,9 @@ export const ConfigForm: React.FC = () => {
               id="intervalType"
               className="select"
               value={tradingStrategy.intervalType}
-              onChange={(e) => {
-                updateTradingStrategy({ 
-                  intervalType: e.target.value as 'seconds' | 'minutes' | 'hours' 
+              onChange={async (e) => {
+                await updateStrategy({
+                  intervalType: e.target.value as 'seconds' | 'minutes' | 'hours'
                 });
                 setShowSaveReminder(true);
               }}
@@ -250,8 +253,8 @@ export const ConfigForm: React.FC = () => {
           <input
             type="checkbox"
             checked={tradingStrategy.active24_7}
-            onChange={(e) => {
-              updateTradingStrategy({ active24_7: e.target.checked });
+            onChange={async (e) => {
+              await updateStrategy({ active24_7: e.target.checked });
               setShowSaveReminder(true);
             }}
             className="rounded border-gray-300 text-primary focus:ring-primary"
