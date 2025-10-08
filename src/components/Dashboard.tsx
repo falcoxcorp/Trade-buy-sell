@@ -1,19 +1,13 @@
 import React from 'react';
 import { useBotStore } from '../store/botStore';
 import { ActivityChart } from './ActivityChart';
-import { BotControlsNew } from './BotControlsNew';
+import { BotControls } from './BotControls';
 import { MarketStats } from './MarketStats';
 import { ActivityLog } from './ActivityLog';
 import { ExternalLink, Twitter, MessageCircle, Phone } from 'lucide-react';
-import { useTransactions } from '../hooks/useBotData';
 
 export const Dashboard: React.FC = () => {
   const { botStats, activityLogs } = useBotStore();
-  const { transactions } = useTransactions();
-
-  const totalBuys = transactions.filter((t) => t.type === 'buy').length;
-  const totalSells = transactions.filter((t) => t.type === 'sell').length;
-  const totalTx = transactions.length;
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-md">
@@ -23,7 +17,7 @@ export const Dashboard: React.FC = () => {
             FalcoX Trading Bot Dashboard
           </h2>
           <div className="text-sm text-gray-600 mt-1">
-            Total Transactions: <span className="font-semibold text-primary">{totalTx}</span>
+            Total Transactions: <span className="font-semibold text-primary">{botStats.totalTx}</span>
           </div>
         </div>
         
@@ -104,22 +98,22 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <MarketStats />
-      <BotControlsNew />
+      <BotControls />
 
       <div className="mt-8">
         <h3 className="text-xl font-semibold mb-4 text-gray-900">Bot Statistics</h3>
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-white p-4 rounded-lg shadow text-center">
             <div className="text-gray-900">Total Transactions</div>
-            <div className="text-2xl font-bold text-primary">{totalTx}</div>
+            <div className="text-2xl font-bold text-primary">{botStats.totalTx}</div>
           </div>
           <div className="bg-white p-4 rounded-lg shadow text-center">
             <div className="text-gray-900">Total Buys</div>
-            <div className="text-2xl font-bold text-primary">{totalBuys}</div>
+            <div className="text-2xl font-bold text-primary">{botStats.totalBuys}</div>
           </div>
           <div className="bg-white p-4 rounded-lg shadow text-center">
             <div className="text-gray-900">Total Sells</div>
-            <div className="text-2xl font-bold text-primary">{totalSells}</div>
+            <div className="text-2xl font-bold text-primary">{botStats.totalSells}</div>
           </div>
         </div>
       </div>
